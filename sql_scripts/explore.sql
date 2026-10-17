@@ -435,3 +435,230 @@ LEFT JOIN monthly_stats curr
 LEFT JOIN monthly_stats prev
   ON prev.month_start = DATE_SUB(p.month_start, INTERVAL 1 MONTH)
 ORDER BY p.month_start;
+
+-- 10/15
+-- name: 2 purchase user view
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 2
+)
+
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where user_id in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2020 and month(event_time) = 2
+group by user_id
+
+-- name: 2 non-purchase user view
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 2
+)
+
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where user_id not in (SELECT user_id from purchase_user) and event_type = 'view'
+and year(event_time) = 2020 and month(event_time) = 2
+group by user_id
+
+-- name: 11 purchase user view
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2019 and month(event_time) = 11
+)
+
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where user_id in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+
+-- name: 11 non-purchase user view
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2019 and month(event_time) = 11
+)
+
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where user_id not in (SELECT user_id from purchase_user) and event_type = 'view'
+and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+
+-- name: 1 purchase user view
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 1
+)
+
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where user_id in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+
+-- name: 1 non-purchase user view
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 1
+)
+
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where user_id not in (SELECT user_id from purchase_user) and event_type = 'view'
+and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+
+-- name: 2 purchase user view / session
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 2
+)
+
+SELECT user_id, count(*) / count(distinct user_session) monthly_view_per_session
+from deduplicated_data
+where user_id in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2020 and month(event_time) = 2
+group by user_id
+
+-- name: 2 non-purchase average view / session
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 2
+)
+
+SELECT user_id, count(*) / count(distinct user_session) monthly_view_per_session
+from deduplicated_data
+where user_id not in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2020 and month(event_time) = 2
+group by user_id
+
+
+-- name: 11 purchase average view / session
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2019 and month(event_time) = 11
+)
+
+SELECT user_id, count(*) / count(distinct user_session) monthly_view_per_session
+from deduplicated_data
+where user_id in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+
+-- name: 11 non-purchase average view / session
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2019 and month(event_time) = 11
+)
+
+SELECT user_id, count(*) / count(distinct user_session) monthly_view_per_session
+from deduplicated_data
+where user_id not in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+
+-- name: 1 purchase average view / session
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 1
+)
+
+SELECT user_id, count(*) / count(distinct user_session) monthly_view_per_session
+from deduplicated_data
+where user_id in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+
+-- name: 1 non-purchase average view / session
+with purchase_user as (
+    select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 1
+)
+
+SELECT user_id, count(*) / count(distinct user_session) monthly_view_per_session
+from deduplicated_data
+where user_id not in (SELECT user_id from purchase_user) and event_type = 'view' 
+and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+
+-- 10/16
+-- name: 11. last month user, months before last month, and current month new
+with purchase_user as (
+select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2019 and month(event_time) = 11
+),
+
+11_valid_user as (
+    select distinct user_id
+from deduplicated_data 
+where user_id in (select distinct user_id from purchase_user) and year(event_time) = 2019 and month(event_time) = 11 and event_type = 'view'
+),
+
+last_month_active_user as (
+    select user_id, 1 last_month_active
+from deduplicated_data
+where (event_time between '2019-10-01 00:00:00' and '2019-10-31 23:59:59') 
+and event_type = 'view' and user_id in (select distinct user_id from 11_valid_user)
+group by user_id
+),
+
+earlier_months_active as (
+    select user_id, 1 earlier_months_active
+from deduplicated_data
+where event_time < '2019-10-01 00:00:00' and event_type = 'view' and user_id in (select distinct user_id from 11_valid_user)
+group by user_id
+)
+
+select a.user_id, coalesce(b.last_month_active, 0) last_month_active, coalesce(c.earlier_months_active, 0) earlier_months_active,
+(case when b.last_month_active is null and c.earlier_months_active is null then 1 else 0 end) first_visit
+from 11_valid_user a
+left join last_month_active_user b on a.user_id = b.user_id
+left join earlier_months_active c on a.user_id = c.user_id
+
+-- name: 1. last month user, months before last month, and current month new
+with purchase_user as (
+select distinct user_id
+from deduplicated_data
+where event_type = 'purchase' and year(event_time) = 2020 and month(event_time) = 1
+),
+
+1_valid_user as (
+    select distinct user_id
+from deduplicated_data 
+where user_id in (select distinct user_id from purchase_user) and year(event_time) = 2020 and month(event_time) = 1 and event_type = 'view'
+),
+
+last_month_active_user as (
+    select user_id, 1 last_month_active
+from deduplicated_data
+where (event_time between '2019-12-01 00:00:00' and '2019-12-31 23:59:59') 
+and event_type = 'view' and user_id in (select distinct user_id from 1_valid_user)
+group by user_id
+),
+
+earlier_months_active as (
+    select user_id, 1 earlier_months_active
+from deduplicated_data
+where event_time < '2019-12-01 00:00:00' and event_type = 'view' and user_id in (select distinct user_id from 1_valid_user)
+group by user_id
+)
+
+select a.user_id, coalesce(b.last_month_active, 0) last_month_active, coalesce(c.earlier_months_active, 0) earlier_months_active,
+(case when b.last_month_active is null and c.earlier_months_active is null then 1 else 0 end) first_visit
+from 1_valid_user a
+left join last_month_active_user b on a.user_id = b.user_id
+left join earlier_months_active c on a.user_id = c.user_id
