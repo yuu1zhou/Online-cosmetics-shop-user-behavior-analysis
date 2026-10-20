@@ -662,3 +662,313 @@ select a.user_id, coalesce(b.last_month_active, 0) last_month_active, coalesce(c
 from 1_valid_user a
 left join last_month_active_user b on a.user_id = b.user_id
 left join earlier_months_active c on a.user_id = c.user_id
+
+-- 10/17 + 10/18
+-- name: feb product category
+select category_id, sum(price) monthly_total_revenue, count(*) total_items_sold, 
+sum(price) / count(*) avg_price
+from deduplicated_data
+where event_time between '2020-02-01 00:00:00' and '2020-02-28 23:59:59'
+and event_type = 'purchase'
+group by category_id
+order by monthly_total_revenue desc, avg_price desc
+
+-- name: feb product category + category
+select category_id, sum(price) monthly_total_revenue, count(*) total_items_sold, 
+sum(price) / count(*) avg_price, (CASE 
+    WHEN sum(price) / count(*) <= 3 THEN 'level 1'
+    WHEN sum(price) / count(*) > 3 and sum(price) / count(*) <= 5.3 THEN 'level 2'
+    WHEN sum(price) / count(*) > 5.3 and sum(price) / count(*) <= 8.3 THEN 'level 3'
+    WHEN sum(price) / count(*) > 8.3 and sum(price) / count(*) <= 16 THEN 'level 4'
+    WHEN sum(price) / count(*) > 16 and sum(price) / count(*) <= 30 THEN 'level 5'
+    WHEN sum(price) / count(*) > 30 and sum(price) / count(*) <= 100 THEN 'level 6'
+    ELSE 'level 7'
+END) price_tier
+from deduplicated_data
+where event_time between '2020-02-01 00:00:00' and '2020-02-28 23:59:59'
+and event_type = 'purchase'
+group by category_id
+order by monthly_total_revenue desc, avg_price desc
+
+-- name: 11. total views 3-100 segment
+with level_3_user as (
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where event_type = 'view' and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+having count(*) <= 100 and count(*) > 3
+),
+
+category_pivot as (
+    select category_id, sum(price) monthly_total_revenue, count(*) total_items_sold, 
+sum(price) / count(*) avg_price, (CASE 
+    WHEN sum(price) / count(*) <= 3 THEN 'level 1'
+    WHEN sum(price) / count(*) > 3 and sum(price) / count(*) <= 8.3 THEN 'level 2'
+    WHEN sum(price) / count(*) > 8.3 and sum(price) / count(*) <= 16 THEN 'level 3'
+    WHEN sum(price) / count(*) > 16 and sum(price) / count(*) <= 30 THEN 'level 4'
+    WHEN sum(price) / count(*) > 30 and sum(price) / count(*) <= 100 THEN 'level 5'
+    ELSE 'level 6'
+END) price_tier
+from deduplicated_data
+where event_time between '2020-02-01 00:00:00' and '2020-02-28 23:59:59'
+and event_type = 'purchase'
+group by category_id
+order by monthly_total_revenue desc, avg_price desc
+)
+
+select u.user_id, d.category_id, d.event_type, c.price_tier 
+from level_3_user u
+inner join deduplicated_data d on u.user_id = d.user_id 
+inner join category_pivot c on c.category_id = d.category_id
+and d.event_time between '2019-11-01 00:00:00' and '2019-11-30 23:59:59'
+where d.event_type = 'view'
+
+-- name: 1. total views 3-100 segment
+with level_3_user as (
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where event_type = 'view' and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+having count(*) <= 100 and count(*) > 3
+),
+
+category_pivot as (
+    select category_id, sum(price) monthly_total_revenue, count(*) total_items_sold, 
+sum(price) / count(*) avg_price, (CASE 
+    WHEN sum(price) / count(*) <= 3 THEN 'level 1'
+    WHEN sum(price) / count(*) > 3 and sum(price) / count(*) <= 8.3 THEN 'level 2'
+    WHEN sum(price) / count(*) > 8.3 and sum(price) / count(*) <= 16 THEN 'level 3'
+    WHEN sum(price) / count(*) > 16 and sum(price) / count(*) <= 30 THEN 'level 4'
+    WHEN sum(price) / count(*) > 30 and sum(price) / count(*) <= 100 THEN 'level 5'
+    ELSE 'level 6'
+END) price_tier
+from deduplicated_data
+where event_time between '2020-02-01 00:00:00' and '2020-02-28 23:59:59'
+and event_type = 'purchase'
+group by category_id
+order by monthly_total_revenue desc, avg_price desc
+)
+
+select u.user_id, d.category_id, d.event_type, c.price_tier 
+from level_3_user u
+inner join deduplicated_data d on u.user_id = d.user_id 
+inner join category_pivot c on c.category_id = d.category_id
+and d.event_time between '2020-01-01 00:00:00' and '2020-01-31 23:59:59'
+where d.event_type = 'view'
+
+
+-- name: v2_11. total views 3-100 segment
+with level_3_user as (
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where event_type = 'view' and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+having count(*) <= 100 and count(*) > 3
+),
+
+t1 as (
+    select u.user_id, d.category_id, count(*) category_total_view
+from level_3_user u
+inner join deduplicated_data d on u.user_id = d.user_id
+where d.event_time between '2019-11-01 00:00:00' and '2019-11-30 23:59:59' and d.event_type = 'view'
+group by u.user_id, d.category_id
+),
+
+t2 as (
+    select *, row_number() over (partition by user_id order by category_total_view desc) r
+from t1
+),
+
+t3 as (
+    select user_id, category_id, category_total_view
+from t2
+where r = 1
+),
+
+t4 AS (
+    SELECT
+        u.user_id,
+        MAX(CASE WHEN d.event_type = 'purchase'
+                 THEN 1 ELSE 0 END) AS is_buyer
+    FROM t3 u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND (d.event_time between '2019-11-01 00:00:00' AND '2019-11-30 23:59:59')
+    GROUP BY u.user_id
+),
+
+t5 as (
+    select t4.user_id, t3.category_id, t4.is_buyer
+from t4 inner join t3 on t4.user_id = t3.user_id
+)
+
+select category_id main_category, count(user_id) user_viewd, 
+count(user_id) / (select count(*) from level_3_user) portion,
+sum(is_buyer) total_buyer,
+sum(is_buyer) / (select count(*) from level_3_user) buyer_rate
+from t5
+group by category_id
+order by user_viewd desc
+
+-- name: v2_1. total views 3-100 segment
+with level_3_user as (
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where event_type = 'view' and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+having count(*) <= 100 and count(*) > 3
+),
+
+t1 as (
+    select u.user_id, d.category_id, count(*) category_total_view
+from level_3_user u
+inner join deduplicated_data d on u.user_id = d.user_id
+where d.event_time between '2020-1-01 00:00:00' and '2020-1-31 23:59:59' and d.event_type = 'view'
+group by u.user_id, d.category_id
+),
+
+t2 as (
+    select *, row_number() over (partition by user_id order by category_total_view desc) r
+from t1
+),
+
+t3 as (
+    select user_id, category_id, category_total_view
+from t2
+where r = 1
+),
+
+t4 AS (
+    SELECT
+        u.user_id,
+        MAX(CASE WHEN d.event_type = 'purchase'
+                 THEN 1 ELSE 0 END) AS is_buyer
+    FROM t3 u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND (d.event_time between '2020-01-01 00:00:00' AND '2020-01-31 23:59:59')
+    GROUP BY u.user_id
+),
+
+t5 as (
+    select t4.user_id, t3.category_id, t4.is_buyer
+from t4 inner join t3 on t4.user_id = t3.user_id
+)
+
+select category_id main_category, count(user_id) user_viewd, 
+count(user_id) / (select count(*) from level_3_user) portion,
+sum(is_buyer) total_buyer,
+sum(is_buyer) / (select count(*) from level_3_user) buyer_rate
+from t5
+group by category_id
+order by user_viewd desc
+
+-- 10/19
+-- name: over all months avg price
+select category_id, avg(price) avg_price_item, COUNT(*) purchase_records
+from deduplicated_data
+where event_type = 'purchase' AND category_id IS NOT NULL
+AND price IS NOT NULL
+group by category_id
+
+-- name: v3_11. total views 3-100 segment
+with level_3_user as (
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where event_type = 'view' and year(event_time) = 2019 and month(event_time) = 11
+group by user_id
+having count(*) <= 100 and count(*) > 3
+),
+
+t1 as (
+    select u.user_id, d.category_id, count(*) category_total_view
+from level_3_user u
+inner join deduplicated_data d on u.user_id = d.user_id
+where d.event_time between '2019-11-01 00:00:00' and '2019-11-30 23:59:59' and d.event_type = 'view'
+group by u.user_id, d.category_id
+),
+
+t2 as (
+    select *, row_number() over (partition by user_id order by category_total_view desc) r
+from t1
+),
+
+t3 as (
+    select user_id, category_id, category_total_view
+from t2
+where r = 1
+),
+
+t4 AS (
+    SELECT
+        u.user_id,
+        MAX(CASE WHEN d.event_type = 'purchase'
+                 THEN 1 ELSE 0 END) AS is_buyer
+    FROM t3 u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND (d.event_time between '2019-11-01 00:00:00' AND '2019-11-30 23:59:59')
+    GROUP BY u.user_id
+),
+
+t5 as (
+    select t4.user_id, t3.category_id, t4.is_buyer
+from t4 inner join t3 on t4.user_id = t3.user_id
+)
+
+select category_id main_category, count(user_id) total_user_viewd, 
+sum(is_buyer) total_buyer
+from t5
+group by category_id
+order by total_user_viewd desc
+
+-- name: v3_1. total views 3-100 segment
+with level_3_user as (
+SELECT user_id, count(*) monthly_total_views
+from deduplicated_data
+where event_type = 'view' and year(event_time) = 2020 and month(event_time) = 1
+group by user_id
+having count(*) <= 100 and count(*) > 3
+),
+
+t1 as (
+    select u.user_id, d.category_id, count(*) category_total_view
+from level_3_user u
+inner join deduplicated_data d on u.user_id = d.user_id
+where d.event_time between '2020-1-01 00:00:00' and '2020-1-31 23:59:59' and d.event_type = 'view'
+group by u.user_id, d.category_id
+),
+
+t2 as (
+    select *, row_number() over (partition by user_id order by category_total_view desc) r
+from t1
+),
+
+t3 as (
+    select user_id, category_id, category_total_view
+from t2
+where r = 1
+),
+
+t4 AS (
+    SELECT
+        u.user_id,
+        MAX(CASE WHEN d.event_type = 'purchase'
+                 THEN 1 ELSE 0 END) AS is_buyer
+    FROM t3 u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND (d.event_time between '2020-01-01 00:00:00' AND '2020-01-31 23:59:59')
+    GROUP BY u.user_id
+),
+
+t5 as (
+    select t4.user_id, t3.category_id, t4.is_buyer
+from t4 inner join t3 on t4.user_id = t3.user_id
+)
+
+select category_id main_category, count(user_id) total_user_viewd, 
+sum(is_buyer) total_buyer
+from t5
+group by category_id
+order by total_user_viewd desc
