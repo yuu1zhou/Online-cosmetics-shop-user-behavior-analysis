@@ -972,3 +972,283 @@ sum(is_buyer) total_buyer
 from t5
 group by category_id
 order by total_user_viewd desc
+
+-- 10/20
+-- name: 11. highest price tier category user viewd
+WITH level_3_user AS (
+    SELECT user_id, COUNT(*) monthly_total_views
+    FROM deduplicated_data
+    WHERE event_type = 'view'
+      AND YEAR(event_time) = 2019
+      AND MONTH(event_time) = 11
+    GROUP BY user_id
+    HAVING COUNT(*) <= 100 AND COUNT(*) > 3
+),
+
+t1 AS (
+    SELECT u.user_id, d.category_id, MAX(d.price) category_max_price
+    FROM level_3_user u
+    INNER JOIN deduplicated_data d ON u.user_id = d.user_id
+    WHERE d.event_time >= '2019-11-01 00:00:00'
+      AND d.event_time < '2019-12-01 00:00:00'
+      AND d.event_type = 'view'
+    GROUP BY u.user_id, d.category_id
+),
+
+t2 AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id
+               ORDER BY category_max_price DESC, category_id
+           ) r
+    FROM t1
+),
+
+t3 AS (
+    SELECT user_id, category_id, category_max_price
+    FROM t2
+    WHERE r = 1
+),
+
+t4 AS (
+    SELECT u.user_id,
+           MAX(
+               CASE WHEN d.event_type = 'purchase'
+                    THEN 1 ELSE 0 END
+           ) is_buyer
+    FROM t3 u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND d.event_time >= '2019-11-01 00:00:00'
+     AND d.event_time < '2019-12-01 00:00:00'
+    GROUP BY u.user_id
+),
+
+t5 AS (
+    SELECT t4.user_id, t3.category_id, t4.is_buyer
+    FROM t4
+    INNER JOIN t3 ON t4.user_id = t3.user_id
+)
+
+SELECT category_id main_category,
+       COUNT(user_id) total_user_viewd,
+       SUM(is_buyer) total_buyer
+FROM t5
+GROUP BY category_id
+ORDER BY total_user_viewd DESC;
+
+-- name: 1. highest price tier category user viewd
+WITH level_3_user AS (
+    SELECT user_id, COUNT(*) monthly_total_views
+    FROM deduplicated_data
+    WHERE event_type = 'view'
+      AND YEAR(event_time) = 2020
+      AND MONTH(event_time) = 1
+    GROUP BY user_id
+    HAVING COUNT(*) <= 100 AND COUNT(*) > 3
+),
+
+t1 AS (
+    SELECT u.user_id, d.category_id, MAX(d.price) category_max_price
+    FROM level_3_user u
+    INNER JOIN deduplicated_data d ON u.user_id = d.user_id
+    WHERE d.event_time >= '2020-01-01 00:00:00'
+      AND d.event_time < '2020-02-01 00:00:00'
+      AND d.event_type = 'view'
+    GROUP BY u.user_id, d.category_id
+),
+
+t2 AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id
+               ORDER BY category_max_price DESC, category_id
+           ) r
+    FROM t1
+),
+
+t3 AS (
+    SELECT user_id, category_id, category_max_price
+    FROM t2
+    WHERE r = 1
+),
+
+t4 AS (
+    SELECT u.user_id,
+           MAX(
+               CASE WHEN d.event_type = 'purchase'
+                    THEN 1 ELSE 0 END
+           ) is_buyer
+    FROM t3 u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND d.event_time >= '2020-01-01 00:00:00'
+     AND d.event_time < '2020-02-01 00:00:00'
+    GROUP BY u.user_id
+),
+
+t5 AS (
+    SELECT t4.user_id, t3.category_id, t4.is_buyer
+    FROM t4
+    INNER JOIN t3 ON t4.user_id = t3.user_id
+)
+
+SELECT category_id main_category,
+       COUNT(user_id) total_user_viewd,
+       SUM(is_buyer) total_buyer
+FROM t5
+GROUP BY category_id
+ORDER BY total_user_viewd DESC;
+
+-- name: 11. cross category user viewed
+WITH level_3_user AS (
+    SELECT user_id, COUNT(*) monthly_total_views
+    FROM deduplicated_data
+    WHERE event_type = 'view'
+      AND YEAR(event_time) = 2019
+      AND MONTH(event_time) = 11
+    GROUP BY user_id
+    HAVING COUNT(*) <= 100 AND COUNT(*) > 3
+),
+
+t1 AS (
+    SELECT u.user_id,
+           COUNT(DISTINCT d.category_id) total_categories_viewed
+    FROM level_3_user u
+    INNER JOIN deduplicated_data d ON u.user_id = d.user_id
+    WHERE d.event_time >= '2019-11-01 00:00:00'
+      AND d.event_time < '2019-12-01 00:00:00'
+      AND d.event_type = 'view'
+    GROUP BY u.user_id
+),
+
+t2 AS (
+    SELECT u.user_id,
+           MAX(
+               CASE WHEN d.event_type = 'purchase'
+                    THEN 1 ELSE 0 END
+           ) is_buyer
+    FROM level_3_user u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND d.event_time >= '2019-11-01 00:00:00'
+     AND d.event_time < '2019-12-01 00:00:00'
+    GROUP BY u.user_id
+),
+
+t3 as (
+    SELECT u.user_id,
+       u.monthly_total_views,
+       t1.total_categories_viewed,
+       t2.is_buyer
+FROM level_3_user u
+INNER JOIN t1 ON u.user_id = t1.user_id
+INNER JOIN t2 ON u.user_id = t2.user_id
+ORDER BY t1.total_categories_viewed DESC
+)
+
+SELECT
+    CASE
+        WHEN total_categories_viewed >= 1
+         AND total_categories_viewed <= 10 THEN '(1, 10]'
+        WHEN total_categories_viewed <= 20 THEN '(10, 20]'
+        WHEN total_categories_viewed <= 30 THEN '(20, 30]'
+        WHEN total_categories_viewed <= 40 THEN '(30, 40]'
+        WHEN total_categories_viewed <= 50 THEN '(40, 50]'
+        WHEN total_categories_viewed <= 60 THEN '(50, 60]'
+        WHEN total_categories_viewed <= 70 THEN '(60, 70]'
+    END categories_viewed_range,
+    COUNT(*) total_base,
+    SUM(is_buyer) total_buyer
+FROM t3
+GROUP BY categories_viewed_range
+ORDER BY MIN(total_categories_viewed)
+
+-- name: 1. cross category user viewed
+WITH level_3_user AS (
+    SELECT user_id, COUNT(*) monthly_total_views
+    FROM deduplicated_data
+    WHERE event_type = 'view'
+      AND YEAR(event_time) = 2020
+      AND MONTH(event_time) = 1
+    GROUP BY user_id
+    HAVING COUNT(*) <= 100 AND COUNT(*) > 3
+),
+
+t1 AS (
+    SELECT u.user_id,
+           COUNT(DISTINCT d.category_id) total_categories_viewed
+    FROM level_3_user u
+    INNER JOIN deduplicated_data d ON u.user_id = d.user_id
+    WHERE d.event_time >= '2020-01-01 00:00:00'
+      AND d.event_time < '2020-02-01 00:00:00'
+      AND d.event_type = 'view'
+    GROUP BY u.user_id
+),
+
+t2 AS (
+    SELECT u.user_id,
+           MAX(
+               CASE WHEN d.event_type = 'purchase'
+                    THEN 1 ELSE 0 END
+           ) is_buyer
+    FROM level_3_user u
+    LEFT JOIN deduplicated_data d
+      ON d.user_id = u.user_id
+     AND d.event_time >= '2020-01-01 00:00:00'
+     AND d.event_time < '2020-02-01 00:00:00'
+    GROUP BY u.user_id
+),
+
+t3 as (
+    SELECT u.user_id,
+       u.monthly_total_views,
+       t1.total_categories_viewed,
+       t2.is_buyer
+FROM level_3_user u
+INNER JOIN t1 ON u.user_id = t1.user_id
+INNER JOIN t2 ON u.user_id = t2.user_id
+ORDER BY t1.total_categories_viewed DESC
+)
+
+SELECT
+    CASE
+        WHEN total_categories_viewed >= 1
+         AND total_categories_viewed <= 10 THEN '(1, 10]'
+        WHEN total_categories_viewed <= 20 THEN '(10, 20]'
+        WHEN total_categories_viewed <= 30 THEN '(20, 30]'
+        WHEN total_categories_viewed <= 40 THEN '(30, 40]'
+        WHEN total_categories_viewed <= 50 THEN '(40, 50]'
+        WHEN total_categories_viewed <= 60 THEN '(50, 60]'
+        WHEN total_categories_viewed <= 70 THEN '(60, 70]'
+    END categories_viewed_range,
+    COUNT(*) total_base,
+    SUM(is_buyer) total_buyer
+FROM t3
+GROUP BY categories_viewed_range
+ORDER BY MIN(total_categories_viewed)
+
+-- name: test
+WITH level_3_user_11 AS (
+    SELECT 11 month, user_id, COUNT(*) monthly_total_views
+    FROM deduplicated_data
+    WHERE event_type = 'view'
+      AND YEAR(event_time) = 2019
+      AND MONTH(event_time) = 11
+    GROUP BY user_id
+    HAVING COUNT(*) <= 100 AND COUNT(*) > 3
+),
+
+level_3_user_1 AS (
+    SELECT 1 month, user_id, COUNT(*) monthly_total_views
+    FROM deduplicated_data
+    WHERE event_type = 'view'
+      AND YEAR(event_time) = 2020
+      AND MONTH(event_time) = 1
+    GROUP BY user_id
+    HAVING COUNT(*) <= 100 AND COUNT(*) > 3
+)
+
+select * from level_3_user_11
+union all
+select * from level_3_user_1
