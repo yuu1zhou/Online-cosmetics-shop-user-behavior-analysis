@@ -810,3 +810,851 @@ ORDER BY
     t3.first_active_date,
     t3.early_return,
     d.relative_day;
+
+
+-- name: daily cohorts by early active days and subsequent purchase
+WITH params AS (
+    -- 请填写已确认完整覆盖的数据截止日
+    SELECT CAST('2019-12-20' AS DATE) data_coverage_end
+),
+
+t1 AS (
+    SELECT
+        month_start,
+        user_id,
+        MIN(DATE(event_time)) first_active_date
+
+    FROM deduplicated_data_processed
+    WHERE month_start >= '2019-10-01'
+      AND month_start < '2019-12-01'
+
+    GROUP BY month_start, user_id
+),
+
+t2 AS (
+    SELECT
+        b.month_start,
+        b.user_id,
+        b.first_active_date,
+
+        -- D0-D10 是否购买
+        MAX(
+            CASE
+                WHEN u.event_type = 'purchase'
+                 AND u.event_time <
+                     DATE_ADD(b.first_active_date, INTERVAL 11 DAY)
+                THEN 1 ELSE 0
+            END
+        ) early_buyer,
+
+        -- D1-D10 的去重活跃天数，不包含 D0
+        COUNT(DISTINCT CASE
+            WHEN u.event_time >=
+                 DATE_ADD(b.first_active_date, INTERVAL 1 DAY)
+             AND u.event_time <
+                 DATE_ADD(b.first_active_date, INTERVAL 11 DAY)
+            THEN DATE(u.event_time)
+        END) early_active_days,
+
+        -- D11-D20 是否购买
+        MAX(
+            CASE
+                WHEN u.event_type = 'purchase'
+                 AND u.event_time >=
+                     DATE_ADD(b.first_active_date, INTERVAL 11 DAY)
+                THEN 1 ELSE 0
+            END
+        ) subsequent_buyer
+
+    FROM t1 b
+    CROSS JOIN params p
+
+    LEFT JOIN deduplicated_data_processed u
+      ON b.user_id = u.user_id
+     AND u.event_time >= b.first_active_date
+     AND u.event_time <
+         DATE_ADD(b.first_active_date, INTERVAL 21 DAY)
+
+    WHERE DATE_ADD(b.first_active_date, INTERVAL 20 DAY)
+              <= p.data_coverage_end
+
+    GROUP BY b.month_start, b.user_id, b.first_active_date
+),
+
+t3 AS (
+    SELECT
+        first_active_date,
+        user_id,
+        subsequent_buyer,
+
+        CASE
+            WHEN early_active_days = 0 THEN 0
+            WHEN early_active_days <= 3 THEN 1
+            WHEN early_active_days <= 6 THEN 2
+            ELSE 3
+        END group_order
+
+    FROM t2
+    WHERE early_buyer = 0
+),
+
+t4 AS (
+    SELECT
+        first_active_date,
+        group_order,
+        COUNT(*) total_users,
+        SUM(subsequent_buyer) subsequent_buyers
+
+    FROM t3
+    GROUP BY first_active_date, group_order
+),
+
+cohort_dates AS (
+    SELECT DISTINCT first_active_date
+    FROM t2
+),
+
+active_groups AS (
+    SELECT 0 group_order, '0' early_active_days_group
+    UNION ALL
+    SELECT 1, '[1, 3]'
+    UNION ALL
+    SELECT 2, '[4, 6]'
+    UNION ALL
+    SELECT 3, '[7, 10]'
+)
+
+SELECT
+    d.first_active_date,
+    g.early_active_days_group,
+    COALESCE(t4.total_users, 0) total_users,
+    COALESCE(t4.subsequent_buyers, 0) subsequent_buyers,
+
+    COALESCE(t4.subsequent_buyers, 0)
+        / NULLIF(t4.total_users, 0) subsequent_purchase_rate
+
+FROM cohort_dates d
+CROSS JOIN active_groups g
+
+LEFT JOIN t4
+  ON d.first_active_date = t4.first_active_date
+ AND g.group_order = t4.group_order
+
+ORDER BY d.first_active_date, g.group_order;
+
+-- name: 11. 2019 one-day-active users sessions and buyer status
+WITH t1 AS (
+    SELECT
+        month_start,
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer,
+
+        SUM(
+            CASE WHEN event_type = 'purchase'
+                 THEN COALESCE(price, 0) ELSE 0 END
+        ) total_purchase_gmv
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-11-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY month_start, user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+)
+
+SELECT
+    t1.*,
+
+    CASE
+        WHEN total_sessions BETWEEN 1 AND 10 THEN '[1, 10]'
+        WHEN total_sessions > 10 AND total_sessions <= 20 THEN '(10, 20]'
+        WHEN total_sessions > 20 AND total_sessions <= 50 THEN '(20, 50]'
+        WHEN total_sessions > 50 AND total_sessions <= 100 THEN '(50, 100]'
+        WHEN total_sessions > 100 THEN '(100, inf]'
+    END session_group
+
+FROM t1
+ORDER BY user_id;
+
+-- name: 10. 2019 one-day-active users by session group
+WITH t1 AS (
+    SELECT
+        month_start,
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer,
+
+        SUM(
+            CASE WHEN event_type = 'purchase'
+                 THEN COALESCE(price, 0) ELSE 0 END
+        ) total_purchase_gmv
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-11-01 00:00:00'
+
+    GROUP BY month_start, user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+)
+
+SELECT
+    t1.*,
+
+    CASE
+        WHEN total_sessions BETWEEN 1 AND 10 THEN '[1, 10]'
+        WHEN total_sessions > 10 AND total_sessions <= 20 THEN '(10, 20]'
+        WHEN total_sessions > 20 AND total_sessions <= 50 THEN '(20, 50]'
+        WHEN total_sessions > 50 AND total_sessions <= 100 THEN '(50, 100]'
+        WHEN total_sessions > 100 THEN '(100, inf]'
+    END session_group
+
+FROM t1
+ORDER BY user_id;
+
+-- name: November one-day-active users by October activity
+WITH november_users AS (
+    SELECT
+        user_id,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-11-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+),
+
+october_users AS (
+    SELECT DISTINCT user_id
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-11-01 00:00:00'
+),
+
+t1 AS (
+    SELECT
+        n.user_id,
+        n.is_buyer,
+
+        CASE
+            WHEN o.user_id IS NOT NULL THEN 1
+            ELSE 0
+        END october_active
+
+    FROM november_users n
+    LEFT JOIN october_users o
+      ON n.user_id = o.user_id
+),
+
+user_groups AS (
+    SELECT 0 october_active, 'no_October_activity' user_group
+    UNION ALL
+    SELECT 1, 'had_October_activity'
+)
+
+SELECT
+    g.user_group,
+    COUNT(t1.user_id) user_base,
+    COALESCE(SUM(t1.is_buyer), 0) buyer_total,
+
+    COALESCE(SUM(t1.is_buyer), 0)
+        / NULLIF(COUNT(t1.user_id), 0) conversion_rate
+
+FROM user_groups g
+LEFT JOIN t1
+  ON g.october_active = t1.october_active
+
+GROUP BY g.october_active, g.user_group
+ORDER BY g.october_active;
+
+-- name: November 2019 one-day-active users by sessions 1 to 10
+WITH t1 AS (
+    SELECT
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-11-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 10
+)
+
+SELECT
+    total_sessions,
+    COUNT(*) total_base,
+    SUM(is_buyer) total_buyer,
+    SUM(is_buyer) / COUNT(*) buyer_rate
+FROM t1
+GROUP BY total_sessions
+ORDER BY total_sessions;
+
+-- name: October 2019 one-day-active users by sessions 1 to 10
+WITH t1 AS (
+    SELECT
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-11-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 10
+)
+
+SELECT
+    total_sessions,
+    COUNT(*) total_base,
+    SUM(is_buyer) total_buyer,
+    SUM(is_buyer) / COUNT(*) buyer_rate
+FROM t1
+GROUP BY total_sessions
+ORDER BY total_sessions;
+
+-- name: November 2019 logs for one-day-active users with 1 to 3 sessions
+WITH t1 AS (
+    SELECT
+        user_id,
+
+        MIN(
+            CASE WHEN event_type = 'purchase'
+                 THEN event_time END
+        ) first_purchase_time
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-11-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 3
+)
+
+SELECT u.*
+FROM deduplicated_data_processed u
+INNER JOIN t1 ON u.user_id = t1.user_id
+
+WHERE u.event_time >= '2019-11-01 00:00:00'
+  AND u.event_time < '2019-12-01 00:00:00'
+  AND (
+      t1.first_purchase_time IS NULL
+      OR u.event_time <= t1.first_purchase_time
+  )
+
+ORDER BY u.user_id, u.event_time;
+
+-- name: October 2019 logs for one-day-active users with 1 to 3 sessions
+WITH t1 AS (
+    SELECT
+        user_id,
+
+        MIN(
+            CASE WHEN event_type = 'purchase'
+                 THEN event_time END
+        ) first_purchase_time
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-11-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 3
+)
+
+SELECT u.*
+FROM deduplicated_data_processed u
+INNER JOIN t1 ON u.user_id = t1.user_id
+
+WHERE u.event_time >= '2019-10-01 00:00:00'
+  AND u.event_time < '2019-11-01 00:00:00'
+  AND (
+      t1.first_purchase_time IS NULL
+      OR u.event_time <= t1.first_purchase_time
+  )
+
+ORDER BY u.user_id, u.event_time;
+
+-- name: October November buyer status and sessions for selected users
+WITH t1 AS (
+    SELECT
+        month_start,
+        user_id,
+        COUNT(DISTINCT DATE(event_time)) total_active_days,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY month_start, user_id
+),
+
+selected_users AS (
+    SELECT DISTINCT user_id
+    FROM t1
+    WHERE total_active_days = 1
+      AND total_sessions BETWEEN 1 AND 3
+)
+
+SELECT
+    m.user_id,
+
+    MAX(
+        CASE WHEN m.month_start = '2019-10-01'
+             THEN m.is_buyer ELSE 0 END
+    ) october_is_buyer,
+
+    MAX(
+        CASE WHEN m.month_start = '2019-11-01'
+             THEN m.is_buyer ELSE 0 END
+    ) november_is_buyer,
+
+    MAX(
+        CASE WHEN m.month_start = '2019-10-01'
+             THEN m.total_sessions ELSE 0 END
+    ) october_total_sessions,
+
+    MAX(
+        CASE WHEN m.month_start = '2019-11-01'
+             THEN m.total_sessions ELSE 0 END
+    ) november_total_sessions
+
+FROM t1 m
+INNER JOIN selected_users s
+  ON m.user_id = s.user_id
+
+GROUP BY m.user_id
+ORDER BY m.user_id;
+
+-- name: October November brand GMV quantity average and rank
+WITH t1 AS (
+    SELECT
+        month_start,
+        brand,
+        SUM(COALESCE(price, 0)) total_gmv,
+        COUNT(*) total_quantity
+
+    FROM deduplicated_data_processed
+    WHERE event_type = 'purchase'
+      AND event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY month_start, brand
+),
+
+t2 AS (
+    SELECT
+        t1.*,
+        total_gmv / total_quantity avg_gmv,
+
+        DENSE_RANK() OVER (
+            PARTITION BY month_start
+            ORDER BY total_gmv / total_quantity DESC
+        ) brand_rank
+
+    FROM t1
+)
+
+SELECT
+    brand,
+
+    MAX(
+        CASE WHEN month_start = '2019-10-01'
+             THEN total_gmv ELSE 0 END
+    ) oct_total_gmv,
+
+    MAX(
+        CASE WHEN month_start = '2019-10-01'
+             THEN total_quantity ELSE 0 END
+    ) oct_total_quantity,
+
+    MAX(
+        CASE WHEN month_start = '2019-10-01'
+             THEN avg_gmv END
+    ) oct_avg_gmv,
+
+    MAX(
+        CASE WHEN month_start = '2019-10-01'
+             THEN brand_rank END
+    ) oct_rank,
+
+    MAX(
+        CASE WHEN month_start = '2019-11-01'
+             THEN total_gmv ELSE 0 END
+    ) nov_total_gmv,
+
+    MAX(
+        CASE WHEN month_start = '2019-11-01'
+             THEN total_quantity ELSE 0 END
+    ) nov_total_quantity,
+
+    MAX(
+        CASE WHEN month_start = '2019-11-01'
+             THEN avg_gmv END
+    ) nov_avg_gmv,
+
+    MAX(
+        CASE WHEN month_start = '2019-11-01'
+             THEN brand_rank END
+    ) nov_rank
+
+FROM t2
+GROUP BY brand
+ORDER BY
+    nov_rank IS NULL,
+    nov_rank,
+    brand;
+
+
+-- name: November 2019 selected users first view and buyer status
+WITH t1 AS (
+    SELECT
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer,
+
+        MIN(
+            CASE WHEN event_type = 'purchase'
+                 THEN event_time END
+        ) first_purchase_time
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-11-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 3
+),
+
+t2 AS (
+    SELECT
+        u.user_id,
+        u.event_time first_view_time,
+        u.category_id,
+        u.brand,
+        u.price,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY u.user_id
+            ORDER BY u.event_time
+        ) r
+
+    FROM t1
+    INNER JOIN deduplicated_data_processed u
+      ON t1.user_id = u.user_id
+
+    WHERE u.event_time >= '2019-11-01 00:00:00'
+      AND u.event_time < '2019-12-01 00:00:00'
+      AND u.event_type = 'view'
+      AND (
+          t1.first_purchase_time IS NULL
+          OR u.event_time < t1.first_purchase_time
+      )
+)
+
+SELECT
+    t1.user_id,
+    t1.total_sessions,
+    t1.is_buyer,
+    t2.first_view_time,
+    t2.category_id,
+    t2.brand,
+    t2.price
+
+FROM t1
+LEFT JOIN t2
+  ON t1.user_id = t2.user_id
+ AND t2.r = 1
+
+ORDER BY t1.user_id;
+
+
+-- name: October 2019 selected users first view and buyer status
+WITH t1 AS (
+    SELECT
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer,
+
+        MIN(
+            CASE WHEN event_type = 'purchase'
+                 THEN event_time END
+        ) first_purchase_time
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-11-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 3
+),
+
+t2 AS (
+    SELECT
+        u.user_id,
+        u.event_time first_view_time,
+        u.category_id,
+        u.brand,
+        u.price,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY u.user_id
+            ORDER BY u.event_time
+        ) r
+
+    FROM t1
+    INNER JOIN deduplicated_data_processed u
+      ON t1.user_id = u.user_id
+
+    WHERE u.event_time >= '2019-10-01 00:00:00'
+      AND u.event_time < '2019-11-01 00:00:00'
+      AND u.event_type = 'view'
+      AND (
+          t1.first_purchase_time IS NULL
+          OR u.event_time < t1.first_purchase_time
+      )
+)
+
+SELECT
+    t1.user_id,
+    t1.total_sessions,
+    t1.is_buyer,
+    t2.first_view_time,
+    t2.category_id,
+    t2.brand,
+    t2.price
+
+FROM t1
+LEFT JOIN t2
+  ON t1.user_id = t2.user_id
+ AND t2.r = 1
+
+ORDER BY t1.user_id;
+
+-- name: November 2019 selected users most interacted product
+WITH t1 AS (
+    SELECT
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer,
+
+        MIN(
+            CASE WHEN event_type = 'purchase'
+                 THEN event_time END
+        ) first_purchase_time
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-11-01 00:00:00'
+      AND event_time < '2019-12-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 3
+),
+
+t2 AS (
+    SELECT
+        u.user_id,
+        u.product_id,
+        u.category_id,
+        u.brand,
+        u.price,
+        u.event_time,
+
+        COUNT(*) OVER (
+            PARTITION BY u.user_id, u.product_id
+        ) total_interactions,
+
+        MIN(u.event_time) OVER (
+            PARTITION BY u.user_id, u.product_id
+        ) first_interaction_time
+
+    FROM t1
+    INNER JOIN deduplicated_data_processed u
+      ON t1.user_id = u.user_id
+
+    WHERE u.event_time >= '2019-11-01 00:00:00'
+      AND u.event_time < '2019-12-01 00:00:00'
+      AND u.event_type IN ('view', 'cart')
+      AND (
+          t1.first_purchase_time IS NULL
+          OR u.event_time < t1.first_purchase_time
+      )
+),
+
+t3 AS (
+    SELECT
+        t2.*,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY user_id
+            ORDER BY
+                total_interactions DESC,
+                first_interaction_time,
+                product_id,
+                event_time DESC,
+                price DESC,
+                category_id,
+                brand
+        ) r
+
+    FROM t2
+)
+
+SELECT
+    t1.user_id,
+    t1.total_sessions,
+    t1.is_buyer,
+    t3.product_id,
+    t3.total_interactions,
+    t3.category_id,
+    t3.brand,
+    t3.price
+
+FROM t1
+LEFT JOIN t3
+  ON t1.user_id = t3.user_id
+ AND t3.r = 1
+
+ORDER BY t1.user_id;
+
+
+
+-- name: October 2019 selected users most interacted product
+WITH t1 AS (
+    SELECT
+        user_id,
+        COUNT(DISTINCT user_session) total_sessions,
+
+        MAX(
+            CASE WHEN event_type = 'purchase'
+                 THEN 1 ELSE 0 END
+        ) is_buyer,
+
+        MIN(
+            CASE WHEN event_type = 'purchase'
+                 THEN event_time END
+        ) first_purchase_time
+
+    FROM deduplicated_data_processed
+    WHERE event_time >= '2019-10-01 00:00:00'
+      AND event_time < '2019-11-01 00:00:00'
+
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT DATE(event_time)) = 1
+       AND COUNT(DISTINCT user_session) BETWEEN 1 AND 3
+),
+
+t2 AS (
+    SELECT
+        u.user_id,
+        u.product_id,
+        u.category_id,
+        u.brand,
+        u.price,
+        u.event_time,
+
+        COUNT(*) OVER (
+            PARTITION BY u.user_id, u.product_id
+        ) total_interactions,
+
+        MIN(u.event_time) OVER (
+            PARTITION BY u.user_id, u.product_id
+        ) first_interaction_time
+
+    FROM t1
+    INNER JOIN deduplicated_data_processed u
+      ON t1.user_id = u.user_id
+
+    WHERE u.event_time >= '2019-10-01 00:00:00'
+      AND u.event_time < '2019-11-01 00:00:00'
+      AND u.event_type IN ('view', 'cart')
+      AND (
+          t1.first_purchase_time IS NULL
+          OR u.event_time < t1.first_purchase_time
+      )
+),
+
+t3 AS (
+    SELECT
+        t2.*,
+
+        ROW_NUMBER() OVER (
+            PARTITION BY user_id
+            ORDER BY
+                total_interactions DESC,
+                first_interaction_time,
+                product_id,
+                event_time DESC,
+                price DESC,
+                category_id,
+                brand
+        ) r
+
+    FROM t2
+)
+
+SELECT
+    t1.user_id,
+    t1.total_sessions,
+    t1.is_buyer,
+    t3.product_id,
+    t3.total_interactions,
+    t3.category_id,
+    t3.brand,
+    t3.price
+
+FROM t1
+LEFT JOIN t3
+  ON t1.user_id = t3.user_id
+ AND t3.r = 1
+
+ORDER BY t1.user_id;
